@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta charset="utf-8" http-equiv="encoding">
+    <title>Sclab_Lifelog_demo</title>
+
+    <script src="../dist/moment.min.js"></script>
+    <script src="../dist/jquery.min.js"></script>
+    <script src="../dist/jquery.daterangepicker.min.js"></script>
+    <script src="../dist/jquery.csv.js"></script>
+    <script src="../dist/vis.js"></script>
+    <script src="elements/Node.js"></script>
+    <script src="elements/Relation.js"></script>
+    <script src="network/SNmanager.js"></script>
+    <script src="util/Util.js"></script>
+    <script src="UserInterface/Timeline.js"></script>
+
+    <link href="../dist/daterangepicker.min.css" rel="stylesheet" type="text/css" />
+    <link href="../dist/vis.css" rel="stylesheet" type="text/css" />
+    <link href="../dist/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    <link href="main.css" rel="stylesheet" type="text/css" />
+
+    <script type="text/javascript">
+        // 이 안에서 vis 라이브러리를 사용해 코딩하면됨
+        var manager = null;
+        var timeline = new Timeline();
+        var network = null;
+        var nodes = null;
+        var edges = null;
+		var patern_network = null;
+		var patern_nodes = null;
+		var patern_edges = null;
+
+        //시각화 초기값
+        $(document).ready(() => {
+            draw_network();
+            draw_timeline();
+            $('#date').dateRangePicker();
+        });
+
+        //fuction1: 타임라인 시각화 함수
+        function draw_timeline(){
+            var timeline_container = document.getElementById('timeline_visualization');
+            if( manager == null) { timeline.init(null); }
+            else { timeline.init(manager.gss); }
+            timeline.draw(timeline_container);
+        }
+
+        //fuction2: 네트워크 시각화 함수
+        function draw_network(){
+            if (network != null) {
+                network.destroy();
+                network = null;
+            }
+            var container = document.getElementById("networkViewer");
+            //네트워크 초기에 'loading' 보여줌
+            if (nodes == null && edges == null) {
+                var data = {
+                    nodes: [{
+                        id: 0,
+                        title: "Loading",
+                        label: "Loading"
+                    }], edges: []
+                };
+                network = new vis.Network(container, data, {});
+                return;
+            }
+            //네트워크 시각화 옵션(크기, 색상)
+            var options = {
+                nodes: {
+                    shape: 'dot',
+                    color: 'rgba(50, 50, 50, 1)',
+                    size: 16
+                },
+                layout: {
+                    randomSeed: 20,
+                    improvedLayout: true
+                },
+                physics: true,
+                interaction: {
+                    tooltipDelay: 200,
+                    hideEdgesOnDrag: false
+                }
+            };
+
+            var data = {nodes: nodes, edges: edges};
+            //네트워크 구조에 데이터 추가
+            network = new vis.Network(container, data, options);
+            network.on("click", addNode);
+            network.fit();
+        }
+
+        //fuction3: 사용자 입력에 따른 데이터 로드 함수. Load 버튼 누를 시 작동.
+        function loadData(){
+            $("#date").attr("disabled", true);
+            $("#personIndex").attr("disabled", true);
+            $("#loadNode").attr("disabled", true);
+            $("#resetNode").attr("disabled", false);
+            $("#searchNode").attr("disabled", false);
+
+            var range = $("#date").val();
+            var start_date = new Date(range.split(' ')[0]);
+            var end_date = new Date(range.split(' ')[2]);
+
+            var days = (end_date - start_date) / (1000 * 60 * 60 * 24);
+            DATASET = SclabUtil.readInputFile(range.split(' ')[0], days + 1, $("#personIndex").val());
+            manager = new SNmanager(DATASET[0]);
+            manager.init();
+            DATASET.shift();
+            manager.makeSN(DATASET);
+
+            timeline.destroy();
+            draw_timeline();
+            resetAllNodes();
+        }
+
+        //fuction4: 서치 결과 리턴. Go버튼 누를 시 작동.
+        function loadSearchResult(){
+            let searchResult = manager.searchNode($("#gss").val(),$("#date-hour").val(), $("#attribute").val()).map(([startsAt, endsAt, value]) => `${startsAt} ~ ${endsAt} : ${value}`).join("<br>");
+            $("#searchResult").html(searchResult);
+			setPaternData();
+			draw_patern_network();
+        }
+
+		function draw_patern_network(){
+			if (patern_network != null) {
+                patern_network.destroy();
+                patern_network = null;
+            }
+			var patern_container = document.getElementById("patern_networkViewer");
+			var patern_options = {
+                nodes: {
+                    shape: 'dot',
+                    color: 'rgba(50, 50, 50, 0.2)',
+                    size: 16
+                },
+                layout: {
+                    randomSeed: 20,
+                    improvedLayout: true
+                },
+                physics: true,
+                interaction: {
+                    tooltipDelay: 200,
+                    hideEdgesOnDrag: false
+                },
+				groups: {
+					patern_root: {
+						shape: 'dot',
+						color: 'rgba(255,0,0,1)' ,
+						size: 35,
+						font: { size: 25, color: 'rgba(0,0,0,1)'}
+					},
+					patern_gss: {
+						shape: 'dot',
+						color: 'rgba(256,165,0,1)',
+						size: 30,
+						font: { size: 20, color: 'rgba(0,0,0,1)'}
+					},
+					patern_attribute: {
+						shape: 'dot',
+						color: 'rgba(256,256,0,1)',
+						size: 25,
+						font: { size: 15, color: 'rgba(0,0,0,1)'}
+					}
+				}
+            };
+			var patern_data = {nodes: patern_nodes, edges: patern_edges};
+			patern_network = new vis.Network(patern_container, patern_data, patern_options);
+			patern_network.fit();
+        }
+
+		function setPaternData(){
+			var nodeResult = manager.getNodeByGTA($("#gss").val(),$("#date-hour").val(), $("#attribute").val());
+			var tempNode = [];
+            var tempEdge = [];
+			tempNode.push({id : "patern_root", label: $("#gss").val(), group: 'patern_root'});
+            patern_nodes = new vis.DataSet(tempNode);
+			patern_edges = new vis.DataSet(tempEdge);
+			for(var i = 0; i < nodeResult.length; i++)
+			{
+				tempNode = [];
+				tempNode.push({id: (nodeResult[i].attribute + nodeResult[i].value), label: (nodeResult[i].attribute + "\n" + nodeResult[i].value), group: 'patern_gss'});
+				patern_nodes.update(tempNode);
+				tempEdge = [];
+				tempEdge.push({to: (nodeResult[i].attribute + nodeResult[i].value), from: "patern_root"});
+				patern_edges.update(tempEdge);
+				for (var j = 0; j < nodeResult[i].children_list.length; j++)
+				{
+					tempNode = [];
+					if(nodeResult[i].children_list[j].attribute == $("#attribute").val())
+						tempNode.push({id: (nodeResult[i].children_list[j].attribute + nodeResult[i].children_list[j].value), label: (nodeResult[i].children_list[j].attribute + "\n" + nodeResult[i].children_list[j].value), group: 'patern_attribute'});
+					else
+						tempNode.push({id: (nodeResult[i].children_list[j].attribute + nodeResult[i].children_list[j].value), label: (nodeResult[i].children_list[j].attribute + "\n" + nodeResult[i].children_list[j].value)});	
+					patern_nodes.update(tempNode);
+					tempEdge = [];
+					tempEdge.push({to: (nodeResult[i].attribute + nodeResult[i].value), from: (nodeResult[i].children_list[j].attribute + nodeResult[i].children_list[j].value)});
+					patern_edges.update(tempEdge);
+				}
+			}
+		}
+
+        //fuction5: 모든 노드, 엣지 초기화 (시각적으로 루트노드만 보여짐). reset 버튼 누를 시 작동.
+        function resetAllNodes() {
+            if (network != null) {
+                network.destroy();
+                network = null;
+            }
+            var keyword = null;
+            try {
+                var keywordValue = document.getElementById('keyword').value;
+                keyword = keywordValue.split(',');
+                if(keyword[0] == ""){
+                    keyword = null;
+                }
+            } catch (err) {
+                keyword = ['Root'];
+            }
+
+            var tempNode = [];
+            var tempEdge = [];
+
+            tempNode.push({id: (manager.root.attribute + manager.root.value), label: manager.root.value});
+            nodes = new vis.DataSet(tempNode);
+            nodes.color = 'rgba(200,200,200,0.5)';
+            edges = new vis.DataSet(tempEdge);
+            draw_network();
+            manager.root.displayed = true;
+        }
+
+        //fuction6: GUI상의 노드 클릭시 해당노드의 child node를 추가하는 함수
+        function addNode(params) {
+            // 클릭된 노드 정보 없을 경우 중단
+            if (params["nodes"].length === 0) {
+                return;
+            }
+            // 클릭된 노드의 정보 불러오기
+            const self_id = params['nodes'][0];
+            const self = manager.getNodeById(remove_index(self_id));
+            // 클릭된 노드가 자식 노드를 가지고 있지 않은 경우 중단
+            if (self.children_list.length === 0) {
+                return;
+            }
+            // 클릭된 횟수 정보가 없는 경우 초기화
+            if (self.open_count === undefined) {
+                self.open_count = 0;
+            }
+            // 자식 노드들에서 중복된 ID가 발생하지 않도록 전처리
+            self.children_list.forEach((child_a, index_a, array) => {
+                if (child_a.id === undefined) {
+                    let index = 0;
+
+                    for (let index_b = 0; index_b < index_a; index_b++) {
+                        const child_b = array[index_b];
+
+                        if ((child_a.attribute === child_b.attribute && child_a.value === child_b.value)) {
+                            index++;
+                        }
+                    }
+                    child_a.id = `${child_a.attribute}${child_a.value}|${index}`
+                }
+            });
+                $('#result').html("");
+                $('#result').html(self.id+" "+self.value+"<br/>");
+
+            // 표시할 노드/엣지 정보를 읽어오고
+            // 이미 표시된 노드들을 제거
+            let tempNodes = [];
+            let tempEdges = [];
+                var i=1;
+                var start_time, end_time;
+                var startDate; // 28, 29, 4, 5 = weekend
+                var s_h, s_m, e_h, e_m, t_h, t_m, sum_h=0, sum_m=0;
+            self.children_list.forEach((child) => {
+                remove_child_node(self, child);
+                tempNodes.push({id: child.id, label: child.value});
+                tempEdges.push({id: get_edge_id(self, child), from: self_id, to: child.id});
+                    start_time = child.value.split(" ")[1];
+                    end_time = child.children_list[0].value.split(" ")[1];
+                    if(start_time!=undefined) {
+                        startDate = child.value.split(" ")[0].split("-")[2];
+                        s_h = start_time.split(":")[0];
+                        s_m = start_time.split(":")[1];
+                        e_h = end_time.split(":")[0];
+                        e_m = end_time.split(":")[1];
+                    if(e_m>=s_m) {
+                        t_m = e_m-s_m;
+                        t_h = e_h-s_h;
+                    } else {
+                        t_m = e_m-s_m+60;
+                        t_h = e_h-1-s_h;
+                    }
+                    <!-- $("#result").append("<div>"+child.attribute+" "+child.value+"<br>"+child.children_list[0].attribute+" "+child.children_list[0].value+"</div>"); -->
+                    <!-- $("#result").append("<div>"+(i++)+" "+start_time+" "+end_time+""); -->
+                    if(t_h>=3) {sum_h+=t_h; sum_m+=t_m;}
+                    if(startDate == 28 || startDate==29 || startDate==4 || startDate==5)
+                        $("#result").append("<div class=\'red\'>"+(i++)+" "+child.value+" "+end_time+" "+t_h+"시간 "+t_m+"분");
+                    else $("#result").append("<div>"+(i++)+" "+child.value+" "+end_time+" "+t_h+"시간 "+t_m+"분");
+                }
+            });
+                sum_h += Math.floor(sum_m/60);
+                sum_m %= 60;
+                $("#result").append("<div>총 "+sum_h+"시간 "+sum_m+"분 수면</div>");
+
+            // 읽어온 노드/엣지 정보 중에서 클릭 횟수에 따른 15개만 추리기
+            if (tempNodes.length > self.open_count * 15) {
+                tempNodes = tempNodes.slice(self.open_count * 15, self.open_count * 15 + 15);
+                tempEdges = tempEdges.slice(self.open_count * 15, self.open_count * 15 + 15);
+                self.open_count++;
+            } else {
+                tempNodes = tempNodes.slice(0, 15);
+                tempEdges = tempEdges.slice(0, 15);
+                self.open_count = 1;
+            }
+            // 화면에 표시
+            nodes.add(tempNodes);
+            edges.add(tempEdges);
+        }
+
+        //fuction7: NetworkManager와 Vis.Dataset의 서로 다른 ID를 정규화하는 함수
+        function remove_index(id) {
+            return id.split("|", 2)[0];
+        }
+
+        //fuction8: Vis.Dataset의 edge ID를 반환
+        function get_edge_id(from, to) {
+            return `${from.id}|${to.id}`;
+        }
+
+        //fuction9: 반복 클릭에 의해 제거되지 않던 child node 재귀적으로 제거
+        function remove_child_node(parent_node, child_node) {
+            for (const node of child_node.children_list) {
+                remove_child_node(child_node, node)
+            }
+
+            nodes.remove(child_node.id);
+            edges.remove(get_edge_id(parent_node, child_node));
+        }
+    </script>
+</head>
+
+<body>
+    <div class="wrapper">
+        <div class="viewer">
+            <div id="networkViewer"></div>
+            <div id="timeline_visualization"></div>
+        </div>
+
+        <div class="panel">
+            <h1>Keyword Input</h1>
+            <div class="group">
+                <div class="row">
+                    <div class="label">Date</div>
+                    <input class="fit" id="date">
+                </div>
+                <div class="row">
+                    <div class="label">Person Index</div>
+                    <input id="personIndex" class="fit" type="number" step="1" min="0" value="1">
+                </div>
+                <div class="row">
+                    <div class="label">Data</div>
+                    <button class="fit" id="loadNode" onclick="loadData();">Load</button>
+                    <button class="fit" id="resetNode" onclick="resetAllNodes();" disabled>Reset</button>
+                </div>
+            </div>
+
+            <h1>Pattern Search</h1>
+            <div class="group">
+                <div class="row">
+                    <input class="fit" id='gss' type="text" placeholder="gss">
+                    <input class="fit" id='date-hour' type="text" placeholder="yyyy-mm-dd-hour">
+                    <input class="fit" id='attribute' type="text" placeholder="attribute">
+                    <button class="fit" id="searchNode" onclick="loadSearchResult();" disabled>Go</button>
+                </div>
+                <div id="searchResult" class="rows"></div>
+            </div>
+
+            <h1>Pattern Information</h1>
+            <div class = "group last" id = 'patern_networkViewer'></div>
+        </div>
+    </div>
+</body>
+</html>
